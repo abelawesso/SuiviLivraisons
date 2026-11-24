@@ -25,20 +25,38 @@ Parcours d’une marchandise : **Commandée → Expédiée (en transit) → Reç
   renvoyée automatiquement au retour de la connexion.
 - **API idempotente.** Une réception renvoyée deux fois (par exemple après une coupure) n’est pas dupliquée :
   l’API répond 409 et le client la considère comme déjà traitée.
-- **SQL Server + Entity Framework Core**, énumérations stockées en texte pour des données lisibles dans les rapports.
-  La suppression en cascade est désactivée sur une relation pour éviter les chemins de cascade multiples refusés par SQL Server.
+- **Entity Framework Core** : énumérations stockées en texte pour des données lisibles dans les rapports.
+  La suppression en cascade est désactivée sur une relation pour éviter les chemins de cascade multiples.
+
+## Base de données
+
+### Développement actuel : InMemory Database
+L'application utilise actuellement **EF Core InMemory** pour le prototypage :
+- ✅ Aucune installation requise, démarrage immédiat
+- ✅ Idéal pour développer et tester
+- ⚠️ **Les données sont réinitialisées à chaque redémarrage** (seed automatique via `DbInitializer`)
+
+### Configuration future : SQL Server LocalDB
+Le projet contient une chaîne de connexion SQL Server dans `appsettings.json` :
+```json
+"ConnectionStrings": {
+  "SuiviLivraisons": "Server=(localdb)\\MSSQLLocalDB;Database=SuiviLivraisons;..."
+}
+```
+Pour migrer vers SQL Server LocalDB (en production) :
+1. Modifier `Program.cs` : remplacer `UseInMemoryDatabase("SuiviLivraisons")` par `UseSqlServer(connectionString)`
+2. Ajouter les migrations EF Core et mettre à jour la base
 
 ## Lancer le projet
 
-Prérequis : SDK .NET 10 et SQL Server LocalDB (installé avec Visual Studio).
+Prérequis : SDK .NET 10 (aucune BD externe requise pour le prototype actuel).
 
 ```powershell
 cd SuiviLivraisons
 dotnet run
 ```
 
-Puis ouvrir http://localhost:5080. La base `SuiviLivraisons` est créée au premier démarrage avec des données de démonstration.
-Pour repartir de zéro : `sqllocaldb` ou SSMS, supprimer la base `SuiviLivraisons`, puis relancer.
+Puis ouvrir le lien affiché (généralement `https://localhost:7xxx`). Les données de démonstration sont chargées automatiquement au démarrage.
 
 ### Tester le mode hors ligne
 
