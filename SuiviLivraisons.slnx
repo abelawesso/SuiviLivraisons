@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="SuiviLivraisons/SuiviLivraisons.csproj" />
+  <Project Path="SuiviLivraisons.Client/SuiviLivraisons.Client.csproj" />
+</Solution>

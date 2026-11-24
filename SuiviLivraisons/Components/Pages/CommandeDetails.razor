@@ -1,0 +1,119 @@
+@page "/commandes/{Id:int}"
+@inject AppDbContext Db
+
+<PageTitle>Commande — Suivi des livraisons</PageTitle>
+
+@if (commande is null)
+{
+    <h1 class="h3">Commande introuvable</h1>
+    <a href="commandes">Retour aux commandes</a>
+}
+else
+{
+    var (css, libelle) = Affichage.Statut(commande.Statut);
+
+    <div class="d-flex justify-content-between align-items-start mb-3">
+        <div>
+            <h1 class="h3 mb-1">Commande @commande.Numero <span class="badge @css fs-6 align-middle">@libelle</span></h1>
+            <div class="text-muted">
+                @commande.Etablissement?.Nom (@commande.Etablissement?.Communaute) · @commande.Fournisseur?.Nom ·
+                commandée le @Affichage.Date(commande.DateCommande)
+            </div>
+        </div>
+        @if (commande.Statut == StatutCommande.Commandee)
+        {
+            <a class="btn btn-primary" href="commandes/@commande.Id/expedier">Enregistrer l’expédition</a>
+        }
+    </div>
+
+    <h2 class="h5">Articles commandés</h2>
+    <table class="table table-sm w-auto">
+        <thead><tr><th>Article</th><th class="text-end">Quantité</th><th class="text-end">Coût unitaire</th><th class="text-end">Total</th></tr></thead>
+        <tbody>
+            @foreach (var l in commande.Lignes)
+            {
+                <tr>
+                    <td>@l.Article</td>
+                    <td class="text-end">@l.QteCommandee</td>
+                    <td class="text-end">@Affichage.Argent(l.CoutUnitaire)</td>
+                    <td class="text-end">@Affichage.Argent(l.QteCommandee * l.CoutUnitaire)</td>
+                </tr>
+            }
+            <tr class="fw-semibold"><td colspan="3">Total</td><td class="text-end">@Affichage.Argent(commande.MontantTotal)</td></tr>
+        </tbody>
+    </table>
+
+    <h2 class="h5 mt-4">Expéditions et réceptions</h2>
+    @if (commande.Expeditions.Count == 0)
+    {
+        <p class="text-muted">Pas encore expédiée.</p>
+    }
+    @foreach (var ex in commande.Expeditions)
+    {
+        var enRetard = ex.Statut == StatutExpedition.EnTransit && ex.DateArriveePrevue.Date < DateTime.Today;
+        <div class="card mb-3 @(enRetard ? "border-danger" : "")">
+            <div class="card-body">
+                <h3 class="h6 mb-1">@Affichage.Mode(ex.Mode) · @ex.Transporteur · n° @ex.NoSuivi</h3>
+                <p class="mb-2 small">
+                    Départ : @Affichage.Date(ex.DateDepart) · Arrivée prévue : @Affichage.Date(ex.DateArriveePrevue) ·
+                    @if (ex.Statut == StatutExpedition.Recue)
+                    {
+                        <span class="text-success">Reçue</span>
+                    }
+                    else if (enRetard)
+                    {
+                        <span class="text-danger fw-semibold">En retard</span>
+                    }
+                    else
+                    {
+                        <span class="text-primary">En transit</span>
+                    }
+                </p>
+
+                @foreach (var r in ex.Receptions)
+                {
+                    <p class="mb-1 small">
+                        Reçue le @Affichage.Date(r.DateReception) par @r.RecuPar
+                        @if (!string.IsNullOrEmpty(r.Commentaire))
+                        {
+                            <span>— « @r.Commentaire »</span>
+                        }
+                    </p>
+                    <table class="table table-sm mb-0">
+                        <thead><tr><th>Article</th><th class="text-end">Commandé</th><th class="text-end">Reçu</th><th>État</th></tr></thead>
+                        <tbody>
+                            @foreach (var lr in r.Lignes)
+                            {
+                                var commandee = lr.LigneCommande?.QteCommandee ?? 0;
+                                var ecart = lr.Etat != EtatReception.Conforme || lr.QteRecue < commandee;
+                                <tr class="@(ecart ? "table-warning" : "")">
+                                    <td>@lr.LigneCommande?.Article</td>
+                                    <td class="text-end">@commandee</td>
+                                    <td class="text-end">@lr.QteRecue</td>
+                                    <td>@Affichage.Etat(lr.Etat)@(ecart ? " — écart à traiter" : "")</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                }
+            </div>
+        </div>
+    }
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private BonCommande? commande;
+
+    protected override async Task OnInitializedAsync()
+    {
+        commande = await Db.BonsCommande
+            .Include(b => b.Etablissement)
+            .Include(b => b.Fournisseur)
+            .Include(b => b.Lignes)
+            .Include(b => b.Expeditions).ThenInclude(e => e.Receptions).ThenInclude(r => r.Lignes).ThenInclude(l => l.LigneCommande)
+            .AsSplitQuery()
+            .FirstOrDefaultAsync(b => b.Id == Id);
+    }
+}

@@ -1,0 +1,107 @@
+@page "/commandes/{Id:int}/expedier"
+@inject AppDbContext Db
+@inject NavigationManager Navigation
+
+<PageTitle>Expédition — Suivi des livraisons</PageTitle>
+
+@if (commande is null)
+{
+    <h1 class="h3">Commande introuvable</h1>
+    <a href="commandes">Retour aux commandes</a>
+}
+else
+{
+    <h1 class="h3 mb-1">Enregistrer l’expédition</h1>
+    <p class="text-muted mb-3">Commande @commande.Numero · @commande.Etablissement?.Nom (@commande.Etablissement?.Communaute)</p>
+
+    @if (commande.Statut != StatutCommande.Commandee)
+    {
+        <div class="alert alert-info">Cette commande a déjà été expédiée.</div>
+        <a href="commandes/@commande.Id">Voir la commande</a>
+    }
+    else
+    {
+        <EditForm Model="Input" FormName="expedier-commande" OnValidSubmit="EnregistrerAsync">
+            <DataAnnotationsValidator />
+            @if (erreur is not null)
+            {
+                <div class="alert alert-danger">@erreur</div>
+            }
+            <div class="row g-3">
+                <div class="col-md-4">
+                    <label class="form-label">Mode de transport</label>
+                    <InputSelect class="form-select" @bind-Value="Input!.Mode">
+                        @foreach (var m in Enum.GetValues<ModeTransport>())
+                        {
+                            <option value="@m">@Affichage.Mode(m)</option>
+                        }
+                    </InputSelect>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Transporteur</label>
+                    <InputText class="form-control" @bind-Value="Input!.Transporteur" />
+                    <ValidationMessage For="() => Input!.Transporteur" />
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Numéro de suivi</label>
+                    <InputText class="form-control" @bind-Value="Input!.NoSuivi" />
+                    <ValidationMessage For="() => Input!.NoSuivi" />
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Date de départ</label>
+                    <InputDate class="form-control" @bind-Value="Input!.DateDepart" />
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Arrivée prévue</label>
+                    <InputDate class="form-control" @bind-Value="Input!.DateArriveePrevue" />
+                </div>
+            </div>
+            <div class="mt-3">
+                <button type="submit" class="btn btn-primary">Enregistrer</button>
+                <a class="btn btn-link" href="commandes/@commande.Id">Annuler</a>
+            </div>
+        </EditForm>
+    }
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+    [SupplyParameterFromForm] private ExpeditionInput? Input { get; set; }
+
+    private BonCommande? commande;
+    private string? erreur;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Input ??= new ExpeditionInput();
+        commande = await Db.BonsCommande
+            .Include(b => b.Etablissement)
+            .FirstOrDefaultAsync(b => b.Id == Id);
+    }
+
+    private async Task EnregistrerAsync()
+    {
+        if (commande is null || commande.Statut != StatutCommande.Commandee) return;
+
+        if (Input!.DateArriveePrevue < Input.DateDepart)
+        {
+            erreur = "L’arrivée prévue ne peut pas précéder la date de départ.";
+            return;
+        }
+
+        Db.Expeditions.Add(new Expedition
+        {
+            BonCommandeId = commande.Id,
+            Mode = Input.Mode,
+            Transporteur = Input.Transporteur!.Trim(),
+            NoSuivi = Input.NoSuivi!.Trim(),
+            DateDepart = Input.DateDepart,
+            DateArriveePrevue = Input.DateArriveePrevue,
+            Statut = StatutExpedition.EnTransit
+        });
+        commande.Statut = StatutCommande.Expediee;
+        await Db.SaveChangesAsync();
+
+        Navigation.NavigateTo($"commandes/{commande.Id}");
+    }
+}

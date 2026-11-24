@@ -1,0 +1,108 @@
+@page "/commandes/nouvelle"
+@inject AppDbContext Db
+@inject NavigationManager Navigation
+
+<PageTitle>Nouvelle commande — Suivi des livraisons</PageTitle>
+
+<h1 class="h3 mb-3">Nouvelle commande</h1>
+
+<EditForm Model="Input" FormName="nouvelle-commande" OnValidSubmit="EnregistrerAsync">
+    <DataAnnotationsValidator />
+
+    @if (erreur is not null)
+    {
+        <div class="alert alert-danger">@erreur</div>
+    }
+
+    <div class="row g-3 mb-3">
+        <div class="col-md-6">
+            <label class="form-label">Établissement destinataire</label>
+            <InputSelect class="form-select" @bind-Value="Input!.EtablissementId">
+                <option value="0">— Choisir —</option>
+                @foreach (var e in etablissements)
+                {
+                    <option value="@e.Id">@e.Communaute — @e.Nom</option>
+                }
+            </InputSelect>
+            <ValidationMessage For="() => Input!.EtablissementId" />
+        </div>
+        <div class="col-md-6">
+            <label class="form-label">Fournisseur</label>
+            <InputSelect class="form-select" @bind-Value="Input!.FournisseurId">
+                <option value="0">— Choisir —</option>
+                @foreach (var f in fournisseurs)
+                {
+                    <option value="@f.Id">@f.Nom</option>
+                }
+            </InputSelect>
+            <ValidationMessage For="() => Input!.FournisseurId" />
+        </div>
+    </div>
+
+    <h2 class="h5">Articles</h2>
+    <table class="table table-sm">
+        <thead><tr><th>Article</th><th style="width:140px">Quantité</th><th style="width:180px">Coût unitaire ($)</th></tr></thead>
+        <tbody>
+            @for (var i = 0; i < Input!.Lignes.Count; i++)
+            {
+                var idx = i;
+                <tr>
+                    <td><InputText class="form-control" @bind-Value="Input!.Lignes[idx].Article" placeholder="Ex. : manuels de français" /></td>
+                    <td><InputNumber class="form-control" @bind-Value="Input!.Lignes[idx].Quantite" /></td>
+                    <td><InputNumber class="form-control" @bind-Value="Input!.Lignes[idx].CoutUnitaire" /></td>
+                </tr>
+            }
+        </tbody>
+    </table>
+
+    <button type="submit" class="btn btn-primary">Enregistrer la commande</button>
+    <a class="btn btn-link" href="commandes">Annuler</a>
+</EditForm>
+
+@code {
+    [SupplyParameterFromForm] private CommandeInput? Input { get; set; }
+
+    private List<Etablissement> etablissements = new();
+    private List<Fournisseur> fournisseurs = new();
+    private string? erreur;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Input ??= new CommandeInput();
+        etablissements = await Db.Etablissements.OrderBy(e => e.Communaute).ThenBy(e => e.Nom).ToListAsync();
+        fournisseurs = await Db.Fournisseurs.OrderBy(f => f.Nom).ToListAsync();
+    }
+
+    private async Task EnregistrerAsync()
+    {
+        var lignes = Input!.Lignes
+            .Where(l => !string.IsNullOrWhiteSpace(l.Article) && l.Quantite > 0)
+            .ToList();
+
+        if (lignes.Count == 0)
+        {
+            erreur = "Ajoutez au moins un article avec une quantité supérieure à zéro.";
+            return;
+        }
+
+        var prochainId = (await Db.BonsCommande.MaxAsync(b => (int?)b.Id) ?? 0) + 1;
+        var commande = new BonCommande
+        {
+            Numero = $"BC-{DateTime.Today.Year}-{prochainId:0000}",
+            EtablissementId = Input.EtablissementId,
+            FournisseurId = Input.FournisseurId,
+            DateCommande = DateTime.Today,
+            Statut = StatutCommande.Commandee,
+            Lignes = lignes.Select(l => new LigneCommande
+            {
+                Article = l.Article!.Trim(),
+                QteCommandee = l.Quantite,
+                CoutUnitaire = l.CoutUnitaire
+            }).ToList()
+        };
+
+        Db.BonsCommande.Add(commande);
+        await Db.SaveChangesAsync();
+        Navigation.NavigateTo($"commandes/{commande.Id}");
+    }
+}

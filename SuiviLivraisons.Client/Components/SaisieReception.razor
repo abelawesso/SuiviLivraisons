@@ -1,0 +1,251 @@
+@inject HttpClient Http
+@inject IJSRuntime JS
+
+@if (enAttente.Count > 0)
+{
+    <div class="alert alert-warning d-flex justify-content-between align-items-center">
+        <div>
+            <strong>@enAttente.Count réception(s) en attente d’envoi</strong> (saisies hors connexion) :
+            @(string.Join(", ", enAttente.Select(r => r.NoSuivi)))
+        </div>
+        <button class="btn btn-sm btn-dark" @onclick="ReessayerAsync" disabled="@occupe">Réessayer l’envoi</button>
+    </div>
+}
+
+@if (message is not null)
+{
+    <div class="alert @classeMessage">@message</div>
+}
+
+@if (expeditions is null)
+{
+    <p class="text-muted">Chargement des expéditions…</p>
+}
+else if (expeditions.Count == 0)
+{
+    <p class="text-muted">Aucune expédition en attente de réception.</p>
+}
+else
+{
+    <div class="mb-3">
+        <label class="form-label">Expédition reçue</label>
+        <select class="form-select" value="@expeditionId" @onchange="ChoisirExpeditionAsync">
+            <option value="0">— Choisir le numéro de suivi —</option>
+            @foreach (var e in expeditions)
+            {
+                var retard = e.DateArriveePrevue.Date < DateTime.Today ? " — en retard" : "";
+                <option value="@e.Id">@e.NoSuivi · @e.Communaute · @e.Etablissement · @e.Mode · prévue le @e.DateArriveePrevue.ToString("d MMM")@retard</option>
+            }
+        </select>
+    </div>
+}
+
+@if (reception is not null)
+{
+    <div class="card">
+        <div class="card-body">
+            <table class="table table-sm align-middle">
+                <thead>
+                    <tr><th>Article</th><th class="text-end">Commandé</th><th style="width:130px">Reçu</th><th style="width:170px">État</th></tr>
+                </thead>
+                <tbody>
+                    @foreach (var ligne in reception.Lignes)
+                    {
+                        var ecart = ligne.QteRecue < ligne.QteCommandee || ligne.Etat != "Conforme";
+                        <tr class="@(ecart ? "table-warning" : "")">
+                            <td>@ligne.Article</td>
+                            <td class="text-end">@ligne.QteCommandee</td>
+                            <td><input type="number" min="0" class="form-control form-control-sm" @bind="ligne.QteRecue" /></td>
+                            <td>
+                                <select class="form-select form-select-sm" @bind="ligne.Etat">
+                                    <option value="Conforme">Conforme</option>
+                                    <option value="Endommage">Endommagé</option>
+                                    <option value="Manquant">Manquant</option>
+                                </select>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+
+            <div class="row g-3">
+                <div class="col-md-5">
+                    <label class="form-label">Reçu par</label>
+                    <input class="form-control" @bind="reception.RecuPar" placeholder="Nom de la personne" />
+                </div>
+                <div class="col-md-7">
+                    <label class="form-label">Commentaire (facultatif)</label>
+                    <input class="form-control" @bind="reception.Commentaire" placeholder="Ex. : 2 boîtes abîmées" />
+                </div>
+            </div>
+
+            <button class="btn btn-success mt-3" @onclick="EnregistrerAsync" disabled="@occupe">Confirmer la réception</button>
+        </div>
+    </div>
+}
+
+@code {
+    private const string CleFile = "suivi-livraisons-receptions-en-attente";
+
+    private enum ResultatEnvoi { Envoye, HorsLigne, Refuse }
+
+    private List<ExpeditionARecevoirDto>? expeditions;
+    private List<ReceptionDto> enAttente = new();
+    private ReceptionDto? reception;
+    private int expeditionId;
+    private string? message;
+    private string classeMessage = "alert-info";
+    private bool occupe;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await ChargerFileAsync();
+        if (enAttente.Count > 0)
+        {
+            // Au retour de la connexion, on tente d'envoyer automatiquement ce qui attend.
+            await EnvoyerFileAsync();
+        }
+        await ChargerExpeditionsAsync();
+    }
+
+    private async Task ChargerExpeditionsAsync()
+    {
+        try
+        {
+            expeditions = await Http.GetFromJsonAsync<List<ExpeditionARecevoirDto>>("api/expeditions/a-recevoir") ?? new();
+            var dejaSaisies = enAttente.Select(r => r.ExpeditionId).ToHashSet();
+            expeditions.RemoveAll(e => dejaSaisies.Contains(e.Id));
+        }
+        catch (HttpRequestException)
+        {
+            expeditions = new();
+            Afficher("Connexion indisponible : la liste des expéditions ne peut pas être chargée pour le moment.", "alert-warning");
+        }
+    }
+
+    private async Task ChoisirExpeditionAsync(ChangeEventArgs e)
+    {
+        expeditionId = int.TryParse(e.Value?.ToString(), out var id) ? id : 0;
+        reception = null;
+        message = null;
+        if (expeditionId == 0) return;
+
+        try
+        {
+            var lignes = await Http.GetFromJsonAsync<List<LigneAReceptionnerDto>>($"api/expeditions/{expeditionId}/lignes") ?? new();
+            reception = new ReceptionDto
+            {
+                ExpeditionId = expeditionId,
+                NoSuivi = expeditions?.FirstOrDefault(x => x.Id == expeditionId)?.NoSuivi ?? "",
+                Lignes = lignes.Select(l => new LigneReceptionDto
+                {
+                    LigneCommandeId = l.LigneCommandeId,
+                    Article = l.Article,
+                    QteCommandee = l.QteCommandee,
+                    QteRecue = l.QteCommandee   // par défaut : tout reçu, on corrige seulement les écarts
+                }).ToList()
+            };
+        }
+        catch (HttpRequestException)
+        {
+            Afficher("Connexion indisponible : impossible de charger les articles de cette expédition.", "alert-warning");
+        }
+    }
+
+    private async Task EnregistrerAsync()
+    {
+        if (reception is null) return;
+        if (string.IsNullOrWhiteSpace(reception.RecuPar))
+        {
+            Afficher("Indiquez le nom de la personne qui reçoit la marchandise.", "alert-danger");
+            return;
+        }
+
+        occupe = true;
+        reception.SaisieLe = DateTime.Now;
+        var resultat = await EnvoyerAsync(reception);
+
+        switch (resultat)
+        {
+            case ResultatEnvoi.Envoye:
+                var ecarts = reception.Lignes.Count(l => l.QteRecue < l.QteCommandee || l.Etat != "Conforme");
+                Afficher(ecarts == 0
+                    ? $"Réception de {reception.NoSuivi} enregistrée : tout est conforme."
+                    : $"Réception de {reception.NoSuivi} enregistrée avec {ecarts} écart(s) : les achats seront avisés.",
+                    ecarts == 0 ? "alert-success" : "alert-warning");
+                expeditions?.RemoveAll(x => x.Id == reception.ExpeditionId);
+                reception = null;
+                expeditionId = 0;
+                break;
+
+            case ResultatEnvoi.HorsLigne:
+                enAttente.Add(reception);
+                await SauverFileAsync();
+                Afficher("Connexion indisponible : la réception est conservée sur cet appareil et sera envoyée dès le retour de la connexion.", "alert-warning");
+                expeditions?.RemoveAll(x => x.Id == reception.ExpeditionId);
+                reception = null;
+                expeditionId = 0;
+                break;
+
+            case ResultatEnvoi.Refuse:
+                Afficher("Le serveur a refusé cette réception. Vérifiez les informations saisies.", "alert-danger");
+                break;
+        }
+        occupe = false;
+    }
+
+    private async Task ReessayerAsync()
+    {
+        occupe = true;
+        await EnvoyerFileAsync();
+        await ChargerExpeditionsAsync();
+        occupe = false;
+    }
+
+    private async Task EnvoyerFileAsync()
+    {
+        foreach (var r in enAttente.ToList())
+        {
+            if (await EnvoyerAsync(r) != ResultatEnvoi.HorsLigne)
+                enAttente.Remove(r);
+        }
+        await SauverFileAsync();
+
+        Afficher(enAttente.Count == 0
+                ? "Les réceptions en attente ont été envoyées."
+                : $"{enAttente.Count} réception(s) toujours en attente : la connexion est encore indisponible.",
+            enAttente.Count == 0 ? "alert-success" : "alert-warning");
+    }
+
+    private async Task<ResultatEnvoi> EnvoyerAsync(ReceptionDto r)
+    {
+        try
+        {
+            var reponse = await Http.PostAsJsonAsync("api/receptions", r);
+            if (reponse.IsSuccessStatusCode || reponse.StatusCode == System.Net.HttpStatusCode.Conflict)
+                return ResultatEnvoi.Envoye;          // 409 = déjà reçue : rien à renvoyer
+            return (int)reponse.StatusCode >= 500 ? ResultatEnvoi.HorsLigne : ResultatEnvoi.Refuse;
+        }
+        catch (HttpRequestException)
+        {
+            return ResultatEnvoi.HorsLigne;
+        }
+    }
+
+    private async Task ChargerFileAsync()
+    {
+        var json = await JS.InvokeAsync<string?>("localStorage.getItem", CleFile);
+        enAttente = string.IsNullOrEmpty(json)
+            ? new()
+            : JsonSerializer.Deserialize<List<ReceptionDto>>(json) ?? new();
+    }
+
+    private async Task SauverFileAsync() =>
+        await JS.InvokeVoidAsync("localStorage.setItem", CleFile, JsonSerializer.Serialize(enAttente));
+
+    private void Afficher(string texte, string classe)
+    {
+        message = texte;
+        classeMessage = classe;
+    }
+}

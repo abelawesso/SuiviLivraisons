@@ -1,0 +1,121 @@
+@page "/"
+@inject AppDbContext Db
+
+<PageTitle>Tableau de bord — Suivi des livraisons</PageTitle>
+
+<h1 class="h3 mb-4">Tableau de bord</h1>
+
+<div class="row g-3 mb-4">
+    <div class="col-6 col-lg-3">
+        <div class="card carte-indicateur h-100"><div class="card-body">
+            <div class="text-muted small">Commandes actives</div>
+            <div class="valeur">@actives</div>
+        </div></div>
+    </div>
+    <div class="col-6 col-lg-3">
+        <div class="card carte-indicateur h-100"><div class="card-body">
+            <div class="text-muted small">Expéditions en transit</div>
+            <div class="valeur text-primary">@enTransit</div>
+        </div></div>
+    </div>
+    <div class="col-6 col-lg-3">
+        <div class="card carte-indicateur h-100 border-danger"><div class="card-body">
+            <div class="text-muted small">Expéditions en retard</div>
+            <div class="valeur text-danger">@retards.Count</div>
+        </div></div>
+    </div>
+    <div class="col-6 col-lg-3">
+        <div class="card carte-indicateur h-100 border-warning"><div class="card-body">
+            <div class="text-muted small">Réceptions avec écarts</div>
+            <div class="valeur text-warning">@partielles</div>
+        </div></div>
+    </div>
+</div>
+
+<h2 class="h5">Expéditions en retard</h2>
+@if (retards.Count == 0)
+{
+    <p class="text-muted">Aucune expédition en retard.</p>
+}
+else
+{
+    <table class="table table-sm table-hover">
+        <thead>
+            <tr><th>Communauté</th><th>Établissement</th><th>Commande</th><th>N° de suivi</th><th>Mode</th><th>Arrivée prévue</th><th class="text-end">Retard</th></tr>
+        </thead>
+        <tbody>
+            @foreach (var r in retards)
+            {
+                <tr>
+                    <td>@r.Communaute</td>
+                    <td>@r.Etablissement</td>
+                    <td><a href="commandes/@r.CommandeId">@r.Numero</a></td>
+                    <td>@r.NoSuivi</td>
+                    <td>@r.Mode</td>
+                    <td>@Affichage.Date(r.Prevue)</td>
+                    <td class="text-end text-danger fw-semibold">@r.Jours j</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+<h2 class="h5 mt-4">Marchandises en transit par communauté</h2>
+@if (parCommunaute.Count == 0)
+{
+    <p class="text-muted">Aucune marchandise en transit.</p>
+}
+else
+{
+    <table class="table table-sm w-auto">
+        <thead><tr><th>Communauté</th><th class="text-end">Expéditions</th><th class="text-end">Valeur en transit</th></tr></thead>
+        <tbody>
+            @foreach (var c in parCommunaute)
+            {
+                <tr><td>@c.Communaute</td><td class="text-end">@c.Nombre</td><td class="text-end">@Affichage.Argent(c.Valeur)</td></tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private record LigneRetard(int CommandeId, string Numero, string Communaute, string Etablissement, string NoSuivi, string Mode, DateTime Prevue, int Jours);
+    private record LigneCommunaute(string Communaute, int Nombre, decimal Valeur);
+
+    private int actives, enTransit, partielles;
+    private List<LigneRetard> retards = new();
+    private List<LigneCommunaute> parCommunaute = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        var aujourdhui = DateTime.Today;
+
+        var transit = await Db.Expeditions
+            .Include(e => e.BonCommande!).ThenInclude(b => b.Etablissement)
+            .Include(e => e.BonCommande!).ThenInclude(b => b.Lignes)
+            .Where(e => e.Statut == StatutExpedition.EnTransit)
+            .AsSplitQuery()
+            .ToListAsync();
+
+        enTransit = transit.Count;
+
+        retards = transit
+            .Where(e => e.DateArriveePrevue.Date < aujourdhui)
+            .Select(e => new LigneRetard(
+                e.BonCommandeId, e.BonCommande!.Numero, e.BonCommande.Etablissement!.Communaute,
+                e.BonCommande.Etablissement.Nom, e.NoSuivi, Affichage.Mode(e.Mode), e.DateArriveePrevue,
+                (aujourdhui - e.DateArriveePrevue.Date).Days))
+            .OrderByDescending(r => r.Jours)
+            .ToList();
+
+        parCommunaute = transit
+            .GroupBy(e => e.BonCommande!.Etablissement!.Communaute)
+            .Select(g => new LigneCommunaute(g.Key, g.Count(), g.Sum(e => e.BonCommande!.MontantTotal)))
+            .OrderByDescending(c => c.Valeur)
+            .ToList();
+
+        actives = await Db.BonsCommande.CountAsync(b =>
+            b.Statut == StatutCommande.Commandee || b.Statut == StatutCommande.Expediee);
+        partielles = await Db.BonsCommande.CountAsync(b => b.Statut == StatutCommande.RecuePartielle);
+    }
+}

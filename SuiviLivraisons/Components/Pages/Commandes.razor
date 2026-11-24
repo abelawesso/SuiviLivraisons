@@ -1,0 +1,65 @@
+@page "/commandes"
+@inject AppDbContext Db
+
+<PageTitle>Commandes — Suivi des livraisons</PageTitle>
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="h3 mb-0">Commandes</h1>
+    <a class="btn btn-primary" href="commandes/nouvelle">Nouvelle commande</a>
+</div>
+
+<div class="mb-3 d-flex flex-wrap gap-2">
+    <a class="btn btn-sm @(string.IsNullOrEmpty(Statut) ? "btn-dark" : "btn-outline-dark")" href="commandes">Toutes</a>
+    @foreach (var s in Enum.GetValues<StatutCommande>())
+    {
+        var (_, libelle) = Affichage.Statut(s);
+        <a class="btn btn-sm @(Statut == s.ToString() ? "btn-dark" : "btn-outline-dark")" href="commandes?statut=@s">@libelle</a>
+    }
+</div>
+
+<table class="table table-hover">
+    <thead>
+        <tr><th>Numéro</th><th>Communauté</th><th>Établissement</th><th>Fournisseur</th><th>Date</th><th class="text-end">Montant</th><th>Statut</th></tr>
+    </thead>
+    <tbody>
+        @foreach (var c in commandes)
+        {
+            var (css, libelle) = Affichage.Statut(c.Statut);
+            <tr>
+                <td><a href="commandes/@c.Id">@c.Numero</a></td>
+                <td>@c.Etablissement?.Communaute</td>
+                <td>@c.Etablissement?.Nom</td>
+                <td>@c.Fournisseur?.Nom</td>
+                <td>@Affichage.Date(c.DateCommande)</td>
+                <td class="text-end">@Affichage.Argent(c.MontantTotal)</td>
+                <td><span class="badge @css">@libelle</span></td>
+            </tr>
+        }
+    </tbody>
+</table>
+
+@if (commandes.Count == 0)
+{
+    <p class="text-muted">Aucune commande pour ce filtre.</p>
+}
+
+@code {
+    [SupplyParameterFromQuery] public string? Statut { get; set; }
+
+    private List<BonCommande> commandes = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        var requete = Db.BonsCommande
+            .Include(b => b.Etablissement)
+            .Include(b => b.Fournisseur)
+            .Include(b => b.Lignes)
+            .AsSplitQuery()
+            .AsQueryable();
+
+        if (Enum.TryParse<StatutCommande>(Statut, out var filtre))
+            requete = requete.Where(b => b.Statut == filtre);
+
+        commandes = await requete.OrderByDescending(b => b.DateCommande).ToListAsync();
+    }
+}

@@ -1,0 +1,21 @@
+@inherits LayoutComponentBase
+
+<nav class="navbar navbar-expand-md navbar-dark bandeau mb-4">
+    <div class="container">
+        <a class="navbar-brand fw-semibold" href="">Suivi des livraisons</a>
+        <div class="navbar-nav flex-wrap">
+            <NavLink class="nav-link" href="" Match="NavLinkMatch.All">Tableau de bord</NavLink>
+            <NavLink class="nav-link" href="commandes" Match="NavLinkMatch.All">Commandes</NavLink>
+            <NavLink class="nav-link" href="commandes/nouvelle">Nouvelle commande</NavLink>
+            <NavLink class="nav-link" href="reception">Réception (établissement)</NavLink>
+        </div>
+    </div>
+</nav>
+
+<main class="container pb-4">
+    @Body
+</main>
+
+<footer class="container text-muted small pb-4">
+    Prototype personnel de réflexion — toutes les données sont fictives.
+</footer>

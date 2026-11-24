@@ -1,0 +1,22 @@
+.bandeau {
+    background-color: #0f5c6e;
+}
+
+h1:focus {
+    outline: none;
+}
+
+.carte-indicateur .valeur {
+    font-size: 2rem;
+    font-weight: 600;
+    line-height: 1.1;
+}
+
+.table td, .table th {
+    vertical-align: middle;
+}
+
+.validation-message {
+    color: #b02a37;
+    font-size: .875rem;
+}

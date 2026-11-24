@@ -1,0 +1,12 @@
+@page "/reception"
+
+<PageTitle>Réception — Suivi des livraisons</PageTitle>
+
+<h1 class="h3 mb-1">Réception des marchandises</h1>
+<p class="text-muted mb-4">
+    Écran destiné au personnel de l’établissement. Il s’exécute dans le navigateur (WebAssembly) :
+    si la connexion est coupée, la réception est conservée sur l’appareil et envoyée plus tard.
+</p>
+
+@* Seul ce composant est interactif. Pas de pré-rendu : il appelle l'API depuis le navigateur. *@
+<SaisieReception @rendermode="new InteractiveWebAssemblyRenderMode(prerender: false)" />
